@@ -24,6 +24,9 @@
 
 #include "private/backend/CommandStream.h"
 
+#include "fg2/FrameGraph.h"
+#include "fg2/details/DependencyGraph.h"
+
 using namespace filament;
 using namespace backend;
 
@@ -446,4 +449,148 @@ TEST_F(FrameGraphTest, MoveGenericResource) {
     EXPECT_EQ(h[0], h[1]);
     EXPECT_EQ(h[1], h[3]);
     EXPECT_EQ(h[3], h[0]);
+}
+
+
+class Node : public fg2::DependencyGraph::Node {
+    const char *mName;
+    bool mCulledCalled = false;
+    char const* getName() const override { return mName; }
+    void onCulled(fg2::DependencyGraph* graph) override { mCulledCalled = true; }
+public:
+    Node(fg2::DependencyGraph& graph, const char* name) noexcept : fg2::DependencyGraph::Node(graph), mName(name) { }
+    bool isCulledCalled() const noexcept { return mCulledCalled; }
+};
+
+TEST(FrameGraph2Test, GraphSimple) {
+    using namespace fg2;
+
+    DependencyGraph graph;
+    Node* n0 = new Node(graph, "node 0");
+    Node* n1 = new Node(graph, "node 1");
+    Node* n2 = new Node(graph, "node 2");
+
+    new DependencyGraph::Edge(graph, n0, n1);
+    new DependencyGraph::Edge(graph, n1, n2);
+    n2->makeTarget();
+
+    graph.cull();
+
+    graph.export_graphviz(utils::slog.d);
+
+    EXPECT_FALSE(n2->isCulled());
+    EXPECT_FALSE(n1->isCulled());
+    EXPECT_FALSE(n0->isCulled());
+    EXPECT_FALSE(n2->isCulledCalled());
+    EXPECT_FALSE(n1->isCulledCalled());
+    EXPECT_FALSE(n0->isCulledCalled());
+
+    EXPECT_EQ(n0->getRefCount(), 1);
+    EXPECT_EQ(n1->getRefCount(), 1);
+    EXPECT_EQ(n2->getRefCount(), 1);
+
+    auto edges = graph.getEdges();
+    auto nodes = graph.getNodes();
+    graph.clear();
+    for (auto e : edges) { delete e; }
+    for (auto n : nodes) { delete n; }
+}
+
+TEST(FrameGraph2Test, GraphCulling1) {
+    using namespace fg2;
+
+    DependencyGraph graph;
+    Node* n0 = new Node(graph, "node 0");
+    Node* n1 = new Node(graph, "node 1");
+    Node* n2 = new Node(graph, "node 2");
+    Node* n1_0 = new Node(graph, "node 1.0");
+
+    new DependencyGraph::Edge(graph, n0, n1);
+    new DependencyGraph::Edge(graph, n1, n2);
+    new DependencyGraph::Edge(graph, n1, n1_0);
+    n2->makeTarget();
+
+    graph.cull();
+
+    graph.export_graphviz(utils::slog.d);
+
+    EXPECT_TRUE(n1_0->isCulled());
+    EXPECT_TRUE(n1_0->isCulledCalled());
+
+    EXPECT_FALSE(n2->isCulled());
+    EXPECT_FALSE(n1->isCulled());
+    EXPECT_FALSE(n0->isCulled());
+    EXPECT_FALSE(n2->isCulledCalled());
+    EXPECT_FALSE(n1->isCulledCalled());
+    EXPECT_FALSE(n0->isCulledCalled());
+
+    EXPECT_EQ(n0->getRefCount(), 1);
+    EXPECT_EQ(n1->getRefCount(), 1);
+    EXPECT_EQ(n2->getRefCount(), 1);
+
+    auto edges = graph.getEdges();
+    auto nodes = graph.getNodes();
+    graph.clear();
+    for (auto e : edges) { delete e; }
+    for (auto n : nodes) { delete n; }
+}
+
+TEST(FrameGraph2Test, GraphCulling2) {
+    using namespace fg2;
+
+    DependencyGraph graph;
+    Node* n0 = new Node(graph, "node 0");
+    Node* n1 = new Node(graph, "node 1");
+    Node* n2 = new Node(graph, "node 2");
+    Node* n1_0 = new Node(graph, "node 1.0");
+    Node* n1_0_0 = new Node(graph, "node 1.0.0");
+    Node* n1_0_1 = new Node(graph, "node 1.0.0");
+
+    new DependencyGraph::Edge(graph, n0, n1);
+    new DependencyGraph::Edge(graph, n1, n2);
+    new DependencyGraph::Edge(graph, n1, n1_0);
+    new DependencyGraph::Edge(graph, n1_0, n1_0_0);
+    new DependencyGraph::Edge(graph, n1_0, n1_0_1);
+    n2->makeTarget();
+
+    graph.cull();
+
+    graph.export_graphviz(utils::slog.d);
+
+    EXPECT_TRUE(n1_0->isCulled());
+    EXPECT_TRUE(n1_0_0->isCulled());
+    EXPECT_TRUE(n1_0_1->isCulled());
+    EXPECT_TRUE(n1_0->isCulledCalled());
+    EXPECT_TRUE(n1_0_0->isCulledCalled());
+    EXPECT_TRUE(n1_0_1->isCulledCalled());
+
+    EXPECT_FALSE(n2->isCulled());
+    EXPECT_FALSE(n1->isCulled());
+    EXPECT_FALSE(n0->isCulled());
+    EXPECT_FALSE(n2->isCulledCalled());
+    EXPECT_FALSE(n1->isCulledCalled());
+    EXPECT_FALSE(n0->isCulledCalled());
+
+    EXPECT_EQ(n0->getRefCount(), 1);
+    EXPECT_EQ(n1->getRefCount(), 1);
+    EXPECT_EQ(n2->getRefCount(), 1);
+
+    auto edges = graph.getEdges();
+    auto nodes = graph.getNodes();
+    graph.clear();
+    for (auto e : edges) { delete e; }
+    for (auto n : nodes) { delete n; }
+}
+
+TEST(FrameGraph2Test, Simple) {
+    using namespace fg2;
+    MockResourceAllocator resourceAllocator;
+    fg2::FrameGraph fg(resourceAllocator);
+    struct Data {
+    };
+    auto& pass = fg.addPass<Data>("test",
+            [&](fg2::FrameGraph::Builder& builder, auto& data) {
+            },
+            [=](FrameGraphResources const& resources, auto const& data, backend::DriverApi& driver) {
+            });
 }

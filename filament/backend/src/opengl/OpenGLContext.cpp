@@ -76,7 +76,7 @@ OpenGLContext::OpenGLContext() noexcept {
         // MacBook Air with an Intel GPU, as well as an Intel NUC Windows PC. For now we're assuming
         // that all Intel GPU's cannot handle feedback loops properly.
         // TODO: match a more specific string pattern after Intel discrete GPU's arrive.
-        bugs.disable_feedback_loops = true;
+        // bugs.disable_feedback_loops = true;
 
     } else if (strstr(renderer, "PowerVR") || strstr(renderer, "Apple")) {
     } else if (strstr(renderer, "Tegra") || strstr(renderer, "GeForce") || strstr(renderer, "NV")) {

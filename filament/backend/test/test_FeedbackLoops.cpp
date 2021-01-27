@@ -34,7 +34,7 @@ using namespace image;
 // Shaders
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-static std::string downsampleVs = R"(#version 450 core
+static std::string fullscreenVs = R"(#version 450 core
 layout(location = 0) in vec4 mesh_position;
 void main() {
     // Hack: move and scale triangle so that it covers entire viewport.
@@ -45,17 +45,49 @@ static std::string downsampleFs = R"(#version 450 core
 layout(location = 0) out vec4 fragColor;
 uniform sampler2D tex;
 void main() {
-    float lod = 0.0;
-    vec2 uv = gl_FragCoord.xy / 256.0 + 0.5 / 256.0;
-    fragColor = textureLod(tex, uv, lod);
+    vec2 texsize = textureSize(tex, 0);
+    float sourceLod = 0.0;
+    vec2 uv = (gl_FragCoord.xy + 0.5) / (texsize / 2.0);
+    fragColor = textureLodOffset(tex, uv, sourceLod, ivec2(-1, -1));
+})";
+
+static std::string upsampleFs = R"(#version 450 core
+layout(location = 0) out vec4 fragColor;
+uniform sampler2D tex;
+void main() {
+    vec2 texsize = vec2(textureSize(tex, 0));
+    float sourceLod = 1.0;
+    vec2 uv = (gl_FragCoord.xy + 0.5) / texsize;
+    fragColor = textureLodOffset(tex, uv, sourceLod, ivec2(-1, -1));
+    fragColor.a = 0.5;
 })";
 
 static uint32_t goldenPixelValue = 0;
+
+static const int kTexSize = 512;
 
 namespace test {
 
 using namespace filament;
 using namespace filament::backend;
+
+static void dumpScreenshot(DriverApi& dapi, Handle<HwRenderTarget> rt) {
+    const size_t size = kTexSize * kTexSize * 4;
+    void* buffer = calloc(1, size);
+    auto cb = [](void* buffer, size_t size, void* user) {
+        int w = kTexSize, h = kTexSize;
+        uint32_t* texels = (uint32_t*) buffer;
+        goldenPixelValue = texels[0];
+        #ifndef IOS
+        LinearImage image(w, h, 4);
+        image = toLinearWithAlpha<uint8_t>(w, h, w * 4, (uint8_t*) buffer);
+        std::ofstream pngstrm("feedback.png", std::ios::binary | std::ios::trunc);
+        ImageEncoder::encode(pngstrm, ImageEncoder::Format::PNG, image, "", "feedback.png");
+        #endif
+    };
+    PixelBufferDescriptor pb(buffer, size, PixelDataFormat::RGBA, PixelDataType::UBYTE, cb);
+    dapi.readPixels(rt, 0, 0, kTexSize, kTexSize, std::move(pb));
+}
 
 TEST_F(BackendTest, FeedbackLoops) {
     // The test is executed within this block scope to force destructors to run before
@@ -65,53 +97,61 @@ TEST_F(BackendTest, FeedbackLoops) {
         auto swapChain = createSwapChain();
         getDriverApi().makeCurrent(swapChain, swapChain);
 
-        // Create a program.
+        // Create programs.
         ProgramHandle downsampleProgram;
         {
-            ShaderGenerator shaderGen(downsampleVs, downsampleFs, sBackend, sIsMobilePlatform);
+            ShaderGenerator shaderGen(fullscreenVs, downsampleFs, sBackend, sIsMobilePlatform);
             Program prog = shaderGen.getProgram();
-            Program::Sampler psamplers[1];
-            psamplers[0].binding = 0;
-            psamplers[0].name = utils::CString("tex");
-            psamplers[0].strict = false;
+            Program::Sampler psamplers[] = { utils::CString("tex"), 0, false };
             prog.setSamplerGroup(0, psamplers, sizeof(psamplers) / sizeof(psamplers[0]));
             downsampleProgram = getDriverApi().createProgram(std::move(prog));
+        }
+        ProgramHandle upsampleProgram;
+        {
+            ShaderGenerator shaderGen(fullscreenVs, upsampleFs, sBackend, sIsMobilePlatform);
+            Program prog = shaderGen.getProgram();
+            Program::Sampler psamplers[] = { utils::CString("tex"), 0, false };
+            prog.setSamplerGroup(0, psamplers, sizeof(psamplers) / sizeof(psamplers[0]));
+            upsampleProgram = getDriverApi().createProgram(std::move(prog));
         }
 
         TrianglePrimitive triangle(getDriverApi());
 
         auto defaultRenderTarget = getDriverApi().createDefaultRenderTarget(0);
 
-        // Create one texture with two miplevels.
+        // Create a Texture with two miplevels.
         auto usage = TextureUsage::COLOR_ATTACHMENT | TextureUsage::SAMPLEABLE;
         Handle<HwTexture> texture = getDriverApi().createTexture(
                     SamplerType::SAMPLER_2D,            // target
                     2,                                  // levels
                     TextureFormat::RGBA8,               // format
                     1,                                  // samples
-                    512,                                // width
-                    512,                                // height
+                    kTexSize,                           // width
+                    kTexSize,                           // height
                     1,                                  // depth
                     usage);                             // usage
 
-        // Create a RenderTarget for miplevel 1.
-        Handle<HwRenderTarget> renderTarget = getDriverApi().createRenderTarget(
-                TargetBufferFlags::COLOR,
-                256,                                       // width of miplevel
-                256,                                       // height of miplevel
-                1,                                         // samples
-                { texture, 1, 0 },                         // color level = 1
-                {},                                        // depth
-                {});                                       // stencil
+        // Create a RenderTarget for each miplevel.
+        Handle<HwRenderTarget> renderTargets[2];
+        for (uint8_t level = 0; level < 2; level++) {
+            renderTargets[level] = getDriverApi().createRenderTarget(
+                    TargetBufferFlags::COLOR,
+                    kTexSize / 2,                              // width of miplevel
+                    kTexSize / 2,                              // height of miplevel
+                    1,                                         // samples
+                    { texture, level, 0 },                     // color level
+                    {},                                        // depth
+                    {});                                       // stencil
+        }
 
-        // Fill the texture with interesting colors.
-        const size_t size = 512 * 512 * 4;
+        // Fill the base level of the texture with interesting colors.
+        const size_t size = kTexSize * kTexSize * 4;
         uint8_t* buffer = (uint8_t*) malloc(size);
-        for (int r = 0, i = 0; r < 512; r++) {
-            for (int c = 0; c < 512; c++, i += 4) {
+        for (int r = 0, i = 0; r < kTexSize; r++) {
+            for (int c = 0; c < kTexSize; c++, i += 4) {
                 buffer[i + 0] = 0x10;
-                buffer[i + 1] = 0xff * r / 511;
-                buffer[i + 2] = 0xff * c / 511;
+                buffer[i + 1] = 0xff * r / (kTexSize - 1);
+                buffer[i + 2] = 0xff * c / (kTexSize - 1);
                 buffer[i + 3] = 0xf0;
             }
          }
@@ -119,21 +159,17 @@ TEST_F(BackendTest, FeedbackLoops) {
         PixelBufferDescriptor pb(buffer, size, PixelDataFormat::RGBA, PixelDataType::UBYTE, cb);
 
         // Upload texture data.
-        getDriverApi().update2DImage(texture, 0, 0, 0, 512, 512, std::move(pb));
+        getDriverApi().update2DImage(texture, 0, 0, 0, kTexSize, kTexSize, std::move(pb));
 
         RenderPassParams params = {};
         params.viewport.left = 0;
         params.viewport.bottom = 0;
-        params.viewport.width = 256;
-        params.viewport.height = 256;
         params.flags.clear = TargetBufferFlags::COLOR;
         params.clearColor = {1.f, 0.f, 0.f, 1.f};
         params.flags.discardStart = TargetBufferFlags::ALL;
         params.flags.discardEnd = TargetBufferFlags::NONE;
 
         PipelineState state;
-        state.program = downsampleProgram;
-        state.rasterState.disableBlending();
         state.rasterState.colorWrite = true;
         state.rasterState.depthWrite = false;
         state.rasterState.depthFunc = RasterState::DepthFunc::A;
@@ -143,45 +179,47 @@ TEST_F(BackendTest, FeedbackLoops) {
         backend::SamplerParams sparams = {};
         sparams.filterMag = SamplerMagFilter::LINEAR;
         sparams.filterMin = SamplerMinFilter::LINEAR_MIPMAP_NEAREST;
-
         samplers.setSampler(0, texture, sparams);
-
         auto sgroup = getDriverApi().createSamplerGroup(samplers.getSize());
         getDriverApi().updateSamplerGroup(sgroup, std::move(samplers.toCommandStream()));
 
         getDriverApi().makeCurrent(swapChain, swapChain);
         getDriverApi().beginFrame(0, 0);
-        getDriverApi().bindSamplers(0, sgroup);
+        getDriverApi().bindSamplers(0, sgroup);    
 
-        // Draw a triangle.
-        getDriverApi().beginRenderPass(renderTarget, params);
+        // Downsample pass.
+        state.rasterState.disableBlending();
+        params.viewport.width = kTexSize / 2;
+        params.viewport.height = kTexSize / 2;
+        state.program = downsampleProgram;
+        // getDriverApi().setMinMaxLevels(texture, 0, 0);
+        getDriverApi().beginRenderPass(renderTargets[1], params);
+        getDriverApi().draw(state, triangle.getRenderPrimitive());
+        getDriverApi().endRenderPass();
+
+        // Upsample pass.
+        state.rasterState.blendFunctionSrcRGB = BlendFunction::SRC_ALPHA;
+        state.rasterState.blendFunctionDstRGB = BlendFunction::ONE_MINUS_SRC_ALPHA;
+        params.viewport.width = kTexSize;
+        params.viewport.height = kTexSize;
+        state.program = upsampleProgram;
+        // getDriverApi().setMinMaxLevels(texture, 1, 1);
+        getDriverApi().beginRenderPass(renderTargets[0], params);
         getDriverApi().draw(state, triangle.getRenderPrimitive());
         getDriverApi().endRenderPass();
 
         // Read back the current render target.
-        const size_t size2 = 256 * 256 * 4;
-        void* buffer2 = calloc(1, size2);
-        auto cb2 = [](void* buffer, size_t size, void* user) {
-            uint32_t* texels = (uint32_t*) buffer;
-            goldenPixelValue = texels[0]; // <-- First column, first row of pixels.
-            #ifndef IOS
-            const size_t width = 256, height = 256;
-            LinearImage image(width, height, 4);
-            image = toLinearWithAlpha<uint8_t>(width, height, width * 4, (uint8_t*) buffer);
-            std::ofstream pngstrm("feedback.png", std::ios::binary | std::ios::trunc);
-            ImageEncoder::encode(pngstrm, ImageEncoder::Format::PNG, image, "", "feedback.png");
-            #endif
-        };
-        PixelBufferDescriptor pb2(buffer2, size2, PixelDataFormat::RGBA, PixelDataType::UBYTE, cb2);
-
-        getDriverApi().readPixels(renderTarget, 0, 0, 256, 256, std::move(pb2));
+        dumpScreenshot(getDriverApi(), renderTargets[0]);
 
         getDriverApi().flush();
         getDriverApi().commit(swapChain);
         getDriverApi().endFrame(0);
 
         getDriverApi().destroyProgram(downsampleProgram);
+        getDriverApi().destroyProgram(upsampleProgram);
         getDriverApi().destroySwapChain(swapChain);
+        getDriverApi().destroyRenderTarget(renderTargets[0]);
+        getDriverApi().destroyRenderTarget(renderTargets[1]);
         getDriverApi().destroyRenderTarget(defaultRenderTarget);
     }
 
@@ -189,7 +227,7 @@ TEST_F(BackendTest, FeedbackLoops) {
     executeCommands();
     getDriver().purge();
 
-    const uint32_t expected = 0xf000ff10;
+    const uint32_t expected = 0x80007f87;
     printf("Pixel value is %8.8x, Expected %8.8x\n", goldenPixelValue, expected);
     EXPECT_EQ(goldenPixelValue, expected);
 }

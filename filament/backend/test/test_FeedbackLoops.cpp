@@ -113,6 +113,41 @@ static void dumpScreenshot(DriverApi& dapi, Handle<HwRenderTarget> rt) {
     dapi.readPixels(rt, 0, 0, kTexWidth, kTexHeight, std::move(pb));
 }
 
+struct MaterialParams {
+    float fbWidth;
+    float fbHeight;
+    float sourceLevel;
+    float unused;
+};
+
+static void uploadUniforms(DriverApi& dapi, Handle<HwUniformBuffer> ubh, MaterialParams params) {
+    MaterialParams* tmp = new MaterialParams(params);
+    auto cb = [](void* buffer, size_t size, void* user) {
+        MaterialParams* sp = (MaterialParams*) buffer;
+        delete sp;
+    };
+    BufferDescriptor bd(tmp, sizeof(MaterialParams), cb);
+    dapi.loadUniformBuffer(ubh, std::move(bd));
+}
+
+static void dumpScreenshot(DriverApi& dapi, Handle<HwRenderTarget> rt) {
+    const size_t size = kTexWidth * kTexHeight * 4;
+    void* buffer = calloc(1, size);
+    auto cb = [](void* buffer, size_t size, void* user) {
+        int w = kTexWidth, h = kTexHeight;
+        const uint32_t* texels = (uint32_t*) buffer;
+        sPixelHashResult = utils::hash::murmur3(texels, size / 4, 0);
+        #ifndef IOS
+        LinearImage image(w, h, 4);
+        image = toLinearWithAlpha<uint8_t>(w, h, w * 4, (uint8_t*) buffer);
+        std::ofstream pngstrm("feedback.png", std::ios::binary | std::ios::trunc);
+        ImageEncoder::encode(pngstrm, ImageEncoder::Format::PNG, image, "", "feedback.png");
+        #endif
+    };
+    PixelBufferDescriptor pb(buffer, size, PixelDataFormat::RGBA, PixelDataType::UBYTE, cb);
+    dapi.readPixels(rt, 0, 0, kTexWidth, kTexHeight, std::move(pb));
+}
+
 TEST_F(BackendTest, FeedbackLoops) {
     auto& api = getDriverApi();
 

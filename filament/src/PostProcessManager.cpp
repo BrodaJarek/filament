@@ -1350,7 +1350,6 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::bloomPass(FrameGraph& fg,
                         .filterMin = SamplerMinFilter::LINEAR /* level is always 0 */
                 });
                 mi->setParameter("level", 0.0f);
-                driver.setMinMaxLevels(hwIn, 0, 0);
                 mi->setParameter("threshold", bloomOptions.threshold ? 1.0f : 0.0f);
                 mi->setParameter("invHighlight", std::isinf(bloomOptions.highlight) ? 0.0f : 1.0f / bloomOptions.highlight);
 
@@ -1374,7 +1373,6 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::bloomPass(FrameGraph& fg,
                             .filterMin = SamplerMinFilter::LINEAR_MIPMAP_NEAREST
                     });
                     mi->setParameter("level", float(i));
-                    driver.setMinMaxLevels(hwIn, i, i);
                 }
             });
 
@@ -1418,15 +1416,12 @@ FrameGraphId<FrameGraphTexture> PostProcessManager::bloomPass(FrameGraph& fg,
                             .filterMin = SamplerMinFilter::LINEAR_MIPMAP_NEAREST
                     });
                     mi->setParameter("level", float(i));
-                    driver.setMinMaxLevels(hwIn, i, i);
                     mi->commit(driver);
 
                     driver.beginRenderPass(hwDstRT.target, hwDstRT.params);
                     driver.draw(pipeline, fullScreenRenderPrimitive);
                     driver.endRenderPass();
                 }
-
-                driver.setMinMaxLevels(hwIn, 0, 1000);
             });
 
     return bloomUpsamplePass.getData().out;

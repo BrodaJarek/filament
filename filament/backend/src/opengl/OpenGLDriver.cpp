@@ -2213,12 +2213,12 @@ void OpenGLDriver::beginRenderPass(Handle<HwRenderTarget> rth,
 
     gl.depthRange(params.depthRange.near, params.depthRange.far);
 
+    // prideout
 #ifndef NDEBUG
     // clear the discarded (but not the cleared ones) buffers in debug builds
     mContext.bindFramebuffer(GL_FRAMEBUFFER, rt->gl.fbo);
     mContext.disable(GL_SCISSOR_TEST);
-    clearWithRasterPipe(discardFlags & ~clearFlags,
-            { 1, 0, 0, 1 }, 1.0, 0);
+    clearWithRasterPipe(discardFlags & ~clearFlags, { 1, 0, 0, 1 }, 1.0, 0);
 #endif
 }
 

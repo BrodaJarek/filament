@@ -171,8 +171,7 @@ TEST_F(BackendTest, FeedbackLoops) {
         RenderPassParams params = {};
         params.viewport.left = 0;
         params.viewport.bottom = 0;
-        params.flags.clear = TargetBufferFlags::COLOR;
-        params.clearColor = {1.f, 0.f, 0.f, 1.f};
+        params.flags.clear = TargetBufferFlags::NONE;
         params.flags.discardStart = TargetBufferFlags::ALL;
         params.flags.discardEnd = TargetBufferFlags::NONE;
         PipelineState state;
@@ -213,6 +212,7 @@ TEST_F(BackendTest, FeedbackLoops) {
         }
 
         // Upsample passes
+        params.flags.discardStart = TargetBufferFlags::NONE;
         state.rasterState.blendFunctionSrcRGB = BlendFunction::SRC_ALPHA;
         state.rasterState.blendFunctionDstRGB = BlendFunction::ONE_MINUS_SRC_ALPHA;
         for (int targetLevel = kNumLevels - 2; targetLevel >= 0; targetLevel--) {
@@ -249,7 +249,7 @@ TEST_F(BackendTest, FeedbackLoops) {
     executeCommands();
     getDriver().purge();
 
-    const uint32_t expected = 0xff001ee1;
+    const uint32_t expected = 0xff00fb10;
     printf("Pixel value is %8.8x, Expected %8.8x\n", goldenPixelValue, expected);
     EXPECT_EQ(goldenPixelValue, expected);
 }

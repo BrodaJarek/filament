@@ -21,6 +21,8 @@
 #include "ShaderGenerator.h"
 #include "TrianglePrimitive.h"
 
+#include <utils/Hash.h>
+
 #include <fstream>
 
 #ifndef IOS
@@ -49,19 +51,20 @@ uniform Params {
     highp float fbWidth;
     highp float fbHeight;
     highp float sourceLevel;
-    highp float blend; // TODO: remove
+    highp float unused;
 } params;
 void main() {
     vec2 fbsize = vec2(params.fbWidth, params.fbHeight);
     vec2 uv = (gl_FragCoord.xy + 0.5) / fbsize;
-    fragColor = textureLodOffset(tex, uv, params.sourceLevel, ivec2(-1, -1));
+    fragColor = textureLod(tex, uv, params.sourceLevel);
 })";
 
-static uint32_t goldenPixelValue = 0;
+static uint32_t goldenPixelHash = 0;
 
 static constexpr int kTexWidth = 360;
 static constexpr int kTexHeight = 375;
 static constexpr int kNumLevels = 6;
+static constexpr int kNumFrames = 2;
 
 namespace test {
 
@@ -72,7 +75,7 @@ struct MaterialParams {
     float fbWidth;
     float fbHeight;
     float sourceLevel;
-    float blend;
+    float unused;
 };
 
 static void uploadUniforms(DriverApi& dapi, Handle<HwUniformBuffer> ubh, MaterialParams params) {
@@ -90,8 +93,8 @@ static void dumpScreenshot(DriverApi& dapi, Handle<HwRenderTarget> rt) {
     void* buffer = calloc(1, size);
     auto cb = [](void* buffer, size_t size, void* user) {
         int w = kTexWidth, h = kTexHeight;
-        uint32_t* texels = (uint32_t*) buffer;
-        goldenPixelValue = texels[0];
+        const uint32_t* texels = (uint32_t*) buffer;
+        goldenPixelHash = utils::hash::murmur3(texels, size / 4, 0);
         #ifndef IOS
         LinearImage image(w, h, 4);
         image = toLinearWithAlpha<uint8_t>(w, h, w * 4, (uint8_t*) buffer);
@@ -156,8 +159,8 @@ TEST_F(BackendTest, FeedbackLoops) {
         for (int r = 0, i = 0; r < kTexHeight; r++) {
             for (int c = 0; c < kTexWidth; c++, i += 4) {
                 buffer[i + 0] = 0x10;
-                buffer[i + 1] = 0xff * r / (kTexHeight - 1);
-                buffer[i + 2] = 0xff * c / (kTexWidth - 1);
+                buffer[i + 1] = 0x1f * r / (kTexHeight - 1);
+                buffer[i + 2] = 0x1f * c / (kTexWidth - 1);
                 buffer[i + 3] = 0xf0;
             }
          }
@@ -165,88 +168,90 @@ TEST_F(BackendTest, FeedbackLoops) {
         PixelBufferDescriptor pb(buffer, size, PixelDataFormat::RGBA, PixelDataType::UBYTE, cb);
         getDriverApi().update2DImage(texture, 0, 0, 0, kTexWidth, kTexHeight, std::move(pb));
 
-        // Prep for rendering.
-        RenderPassParams params = {};
-        params.flags.clear = TargetBufferFlags::NONE;
-        params.flags.discardEnd = TargetBufferFlags::NONE;
-        PipelineState state;
-        state.rasterState.colorWrite = true;
-        state.rasterState.depthWrite = false;
-        state.rasterState.depthFunc = RasterState::DepthFunc::A;
-        state.program = program;
-        backend::SamplerGroup samplers(1);
-        backend::SamplerParams sparams = {};
-        sparams.filterMag = SamplerMagFilter::LINEAR;
-        sparams.filterMin = SamplerMinFilter::LINEAR_MIPMAP_NEAREST;
-        samplers.setSampler(0, texture, sparams);
-        auto sgroup = getDriverApi().createSamplerGroup(samplers.getSize());
-        getDriverApi().updateSamplerGroup(sgroup, std::move(samplers.toCommandStream()));
-        auto ubuffer = getDriverApi().createUniformBuffer(sizeof(MaterialParams),
-                backend::BufferUsage::STATIC);
-        getDriverApi().makeCurrent(swapChain, swapChain);
-        getDriverApi().beginFrame(0, 0);
-        getDriverApi().bindSamplers(0, sgroup);    
-        getDriverApi().bindUniformBuffer(0, ubuffer);
+        for (int frame = 0; frame < kNumFrames; frame++) {
 
-        // Downsample passes
-        params.flags.discardStart = TargetBufferFlags::ALL;
-        state.rasterState.disableBlending();
-        for (int targetLevel = 1; targetLevel < kNumLevels; targetLevel++) {
-            params.viewport.width = kTexWidth >> targetLevel;
-            params.viewport.height = kTexHeight >> targetLevel;
-            uploadUniforms(getDriverApi(), ubuffer, {
-                .fbWidth = float(params.viewport.width),
-                .fbHeight = float(params.viewport.height),
-                .sourceLevel = float(targetLevel - 1),
-                .blend = 0.0f,
-            });
-            // getDriverApi().setMinMaxLevels(texture, 0, 0);
-            getDriverApi().beginRenderPass(renderTargets[targetLevel], params);
-            getDriverApi().draw(state, triangle.getRenderPrimitive());
-            getDriverApi().endRenderPass();
+            // Prep for rendering.
+            RenderPassParams params = {};
+            params.flags.clear = TargetBufferFlags::NONE;
+            params.flags.discardEnd = TargetBufferFlags::NONE;
+            PipelineState state;
+            state.rasterState.colorWrite = true;
+            state.rasterState.depthWrite = false;
+            state.rasterState.depthFunc = RasterState::DepthFunc::A;
+            state.program = program;
+            backend::SamplerGroup samplers(1);
+            backend::SamplerParams sparams = {};
+            sparams.filterMag = SamplerMagFilter::LINEAR;
+            sparams.filterMin = SamplerMinFilter::LINEAR_MIPMAP_NEAREST;
+            samplers.setSampler(0, texture, sparams);
+            auto sgroup = getDriverApi().createSamplerGroup(samplers.getSize());
+            getDriverApi().updateSamplerGroup(sgroup, std::move(samplers.toCommandStream()));
+            auto ubuffer = getDriverApi().createUniformBuffer(sizeof(MaterialParams),
+                    backend::BufferUsage::STATIC);
+            getDriverApi().makeCurrent(swapChain, swapChain);
+            getDriverApi().beginFrame(0, 0);
+            getDriverApi().bindSamplers(0, sgroup);    
+            getDriverApi().bindUniformBuffer(0, ubuffer);
+
+            // Downsample passes
+            params.flags.discardStart = TargetBufferFlags::ALL;
+            state.rasterState.disableBlending();
+            for (int targetLevel = 1; targetLevel < kNumLevels; targetLevel++) {
+                params.viewport.width = kTexWidth >> targetLevel;
+                params.viewport.height = kTexHeight >> targetLevel;
+                uploadUniforms(getDriverApi(), ubuffer, {
+                    .fbWidth = float(params.viewport.width),
+                    .fbHeight = float(params.viewport.height),
+                    .sourceLevel = float(targetLevel - 1),
+                });
+                // getDriverApi().setMinMaxLevels(texture, 0, 0);
+                getDriverApi().beginRenderPass(renderTargets[targetLevel], params);
+                getDriverApi().draw(state, triangle.getRenderPrimitive());
+                getDriverApi().endRenderPass();
+            }
+
+            // Upsample passes
+            params.flags.discardStart = TargetBufferFlags::NONE;
+            state.rasterState.blendFunctionSrcRGB = BlendFunction::ONE;
+            state.rasterState.blendFunctionDstRGB = BlendFunction::ONE;
+            for (int targetLevel = kNumLevels - 2; targetLevel >= 0; targetLevel--) {
+                params.viewport.width = kTexWidth >> targetLevel;
+                params.viewport.height = kTexHeight >> targetLevel;
+                uploadUniforms(getDriverApi(), ubuffer, {
+                    .fbWidth = float(params.viewport.width),
+                    .fbHeight = float(params.viewport.height),
+                    .sourceLevel = float(targetLevel + 1),
+                });
+                // getDriverApi().setMinMaxLevels(texture, 1, 1);
+                getDriverApi().beginRenderPass(renderTargets[targetLevel], params);
+                getDriverApi().draw(state, triangle.getRenderPrimitive());
+                getDriverApi().endRenderPass();
+            }
+
+            // Read back the render target corresponding to the base level.
+            //
+            // NOTE: Calling glReadPixels on any miplevel other than the base level
+            // seems to be un-reliable on some GPU's.
+            if (frame == kNumFrames - 1) {
+                dumpScreenshot(getDriverApi(), renderTargets[0]);
+            }
+
+            getDriverApi().flush();
+            getDriverApi().commit(swapChain);
+            getDriverApi().endFrame(0);
+            getDriverApi().finish();
+            executeCommands();
+            getDriver().purge();
         }
-
-        // Upsample passes
-        params.flags.discardStart = TargetBufferFlags::NONE;
-        state.rasterState.blendFunctionSrcRGB = BlendFunction::ONE;
-        state.rasterState.blendFunctionDstRGB = BlendFunction::ONE;
-        for (int targetLevel = kNumLevels - 2; targetLevel >= 0; targetLevel--) {
-            params.viewport.width = kTexWidth >> targetLevel;
-            params.viewport.height = kTexHeight >> targetLevel;
-            uploadUniforms(getDriverApi(), ubuffer, {
-                .fbWidth = float(params.viewport.width),
-                .fbHeight = float(params.viewport.height),
-                .sourceLevel = float(targetLevel + 1),
-                .blend = 1.0f,
-            });
-            // getDriverApi().setMinMaxLevels(texture, 1, 1);
-            getDriverApi().beginRenderPass(renderTargets[targetLevel], params);
-            getDriverApi().draw(state, triangle.getRenderPrimitive());
-            getDriverApi().endRenderPass();
-        }
-
-        // Read back the render target corresponding to the base level.
-        //
-        // NOTE: Calling glReadPixels on any miplevel other than the base level
-        // seems to be un-reliable on some GPU's.
-        dumpScreenshot(getDriverApi(), renderTargets[0]);
-
-        getDriverApi().flush();
-        getDriverApi().commit(swapChain);
-        getDriverApi().endFrame(0);
 
         getDriverApi().destroyProgram(program);
         getDriverApi().destroySwapChain(swapChain);
         for (auto rt : renderTargets)  getDriverApi().destroyRenderTarget(rt);
     }
 
-    getDriverApi().finish();
-    executeCommands();
-    getDriver().purge();
-
-    const uint32_t expected = 0xff12ff60;
-    printf("Pixel value is 0x%8.8x, Expected 0x%8.8x\n", goldenPixelValue, expected);
-    EXPECT_EQ(goldenPixelValue, expected);
+    const uint32_t expected = 0xfc0fac30;
+    printf("Computed hash is 0x%8.8x, Expected 0x%8.8x\n", goldenPixelHash, expected);
+    EXPECT_TRUE(goldenPixelHash == expected);
 }
 
 } // namespace test

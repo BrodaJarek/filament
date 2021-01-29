@@ -59,12 +59,17 @@ void main() {
     fragColor = textureLod(tex, uv, params.sourceLevel);
 })";
 
-static uint32_t goldenPixelHash = 0;
+static uint32_t sPixelHashResult = 0;
+
+// Selecting a NPOT texture size seems to exacerbate the bug seen with Intel GPU's.
+// Note that Filament uses a higher precision format (R11F_G11F_B10F) but this does not seem
+// necessary to trigger the bug.
 
 static constexpr int kTexWidth = 360;
-static constexpr int kTexHeight = 375;
-static constexpr int kNumLevels = 6;
+static constexpr int kTexHeight = 180;
+static constexpr int kNumLevels = 3;
 static constexpr int kNumFrames = 2;
+static constexpr auto kTexFormat = filament::backend::TextureFormat::RGB8;
 
 namespace test {
 
@@ -94,7 +99,7 @@ static void dumpScreenshot(DriverApi& dapi, Handle<HwRenderTarget> rt) {
     auto cb = [](void* buffer, size_t size, void* user) {
         int w = kTexWidth, h = kTexHeight;
         const uint32_t* texels = (uint32_t*) buffer;
-        goldenPixelHash = utils::hash::murmur3(texels, size / 4, 0);
+        sPixelHashResult = utils::hash::murmur3(texels, size / 4, 0);
         #ifndef IOS
         LinearImage image(w, h, 4);
         image = toLinearWithAlpha<uint8_t>(w, h, w * 4, (uint8_t*) buffer);
@@ -130,27 +135,14 @@ TEST_F(BackendTest, FeedbackLoops) {
         // Create a texture.
         auto usage = TextureUsage::COLOR_ATTACHMENT | TextureUsage::SAMPLEABLE;
         Handle<HwTexture> texture = getDriverApi().createTexture(
-                    SamplerType::SAMPLER_2D,            // target
-                    kNumLevels,                         // levels
-                    TextureFormat::R11F_G11F_B10F,      // format
-                    1,                                  // samples
-                    kTexWidth,                          // width
-                    kTexHeight,                         // height
-                    1,                                  // depth
-                    usage);                             // usage
+            SamplerType::SAMPLER_2D, kNumLevels, kTexFormat, 1, kTexWidth, kTexHeight, 1, usage);
 
         // Create a RenderTarget for each miplevel.
         Handle<HwRenderTarget> renderTargets[kNumLevels];
         for (uint8_t level = 0; level < kNumLevels; level++) {
             printf("Level %d: %d x %d\n", level, kTexWidth >> level, kTexHeight >> level);
-            renderTargets[level] = getDriverApi().createRenderTarget(
-                    TargetBufferFlags::COLOR,
-                    kTexWidth >> level,                 // width of miplevel
-                    kTexHeight >> level,                // height of miplevel
-                    1,                                  // samples
-                    { texture, level, 0 },              // color level
-                    {},                                 // depth
-                    {});                                // stencil
+            renderTargets[level] = getDriverApi().createRenderTarget( TargetBufferFlags::COLOR,
+                    kTexWidth >> level, kTexHeight >> level, 1, { texture, level, 0 }, {}, {});
         }
 
         // Fill the base level of the texture with interesting colors.
@@ -190,7 +182,7 @@ TEST_F(BackendTest, FeedbackLoops) {
                     backend::BufferUsage::STATIC);
             getDriverApi().makeCurrent(swapChain, swapChain);
             getDriverApi().beginFrame(0, 0);
-            getDriverApi().bindSamplers(0, sgroup);    
+            getDriverApi().bindSamplers(0, sgroup);
             getDriverApi().bindUniformBuffer(0, ubuffer);
 
             // Downsample passes
@@ -250,8 +242,8 @@ TEST_F(BackendTest, FeedbackLoops) {
     }
 
     const uint32_t expected = 0xfc0fac30;
-    printf("Computed hash is 0x%8.8x, Expected 0x%8.8x\n", goldenPixelHash, expected);
-    EXPECT_TRUE(goldenPixelHash == expected);
+    printf("Computed hash is 0x%8.8x, Expected 0x%8.8x\n", sPixelHashResult, expected);
+    EXPECT_TRUE(sPixelHashResult == expected);
 }
 
 } // namespace test

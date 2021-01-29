@@ -48,23 +48,20 @@ layout(location = 0) uniform sampler2D tex;
 uniform Params {
     highp float fbWidth;
     highp float fbHeight;
-    highp float sourceLod;
-    highp float blend;
+    highp float sourceLevel;
+    highp float blend; // TODO: remove
 } params;
 void main() {
     vec2 fbsize = vec2(params.fbWidth, params.fbHeight);
     vec2 uv = (gl_FragCoord.xy + 0.5) / fbsize;
-    fragColor = textureLodOffset(tex, uv, params.sourceLod, ivec2(-1, -1));
-    if (params.blend > 0.0) {
-        fragColor.a = 0.5;
-    }
+    fragColor = textureLodOffset(tex, uv, params.sourceLevel, ivec2(-1, -1));
 })";
 
 static uint32_t goldenPixelValue = 0;
 
 static constexpr int kTexWidth = 360;
 static constexpr int kTexHeight = 375;
-static constexpr int kNumLevels = 4;
+static constexpr int kNumLevels = 5;
 
 namespace test {
 
@@ -74,7 +71,7 @@ using namespace filament::backend;
 struct MaterialParams {
     float fbWidth;
     float fbHeight;
-    float sourceLod;
+    float sourceLevel;
     float blend;
 };
 
@@ -169,16 +166,12 @@ TEST_F(BackendTest, FeedbackLoops) {
 
         // Prep for rendering.
         RenderPassParams params = {};
-        params.viewport.left = 0;
-        params.viewport.bottom = 0;
         params.flags.clear = TargetBufferFlags::NONE;
-        params.flags.discardStart = TargetBufferFlags::ALL;
         params.flags.discardEnd = TargetBufferFlags::NONE;
         PipelineState state;
         state.rasterState.colorWrite = true;
         state.rasterState.depthWrite = false;
         state.rasterState.depthFunc = RasterState::DepthFunc::A;
-        state.rasterState.culling = CullingMode::NONE;
         state.program = program;
         backend::SamplerGroup samplers(1);
         backend::SamplerParams sparams = {};
@@ -195,6 +188,7 @@ TEST_F(BackendTest, FeedbackLoops) {
         getDriverApi().bindUniformBuffer(0, ubuffer);
 
         // Downsample passes
+        params.flags.discardStart = TargetBufferFlags::ALL;
         state.rasterState.disableBlending();
         for (int targetLevel = 1; targetLevel < kNumLevels; targetLevel++) {
             params.viewport.width = kTexWidth >> targetLevel;
@@ -202,7 +196,7 @@ TEST_F(BackendTest, FeedbackLoops) {
             uploadUniforms(getDriverApi(), ubuffer, {
                 .fbWidth = float(params.viewport.width),
                 .fbHeight = float(params.viewport.height),
-                .sourceLod = float(targetLevel - 1),
+                .sourceLevel = float(targetLevel - 1),
                 .blend = 0.0f,
             });
             // getDriverApi().setMinMaxLevels(texture, 0, 0);
@@ -213,15 +207,15 @@ TEST_F(BackendTest, FeedbackLoops) {
 
         // Upsample passes
         params.flags.discardStart = TargetBufferFlags::NONE;
-        state.rasterState.blendFunctionSrcRGB = BlendFunction::SRC_ALPHA;
-        state.rasterState.blendFunctionDstRGB = BlendFunction::ONE_MINUS_SRC_ALPHA;
+        state.rasterState.blendFunctionSrcRGB = BlendFunction::ONE;
+        state.rasterState.blendFunctionDstRGB = BlendFunction::ONE;
         for (int targetLevel = kNumLevels - 2; targetLevel >= 0; targetLevel--) {
             params.viewport.width = kTexWidth >> targetLevel;
             params.viewport.height = kTexHeight >> targetLevel;
             uploadUniforms(getDriverApi(), ubuffer, {
                 .fbWidth = float(params.viewport.width),
                 .fbHeight = float(params.viewport.height),
-                .sourceLod = float(targetLevel + 1),
+                .sourceLevel = float(targetLevel + 1),
                 .blend = 1.0f,
             });
             // getDriverApi().setMinMaxLevels(texture, 1, 1);
@@ -233,7 +227,7 @@ TEST_F(BackendTest, FeedbackLoops) {
         // Read back the render target corresponding to the base level.
         //
         // NOTE: Calling glReadPixels on any miplevel other than the base level
-        // seems to un un-reliable on some GPU's.
+        // seems to be un-reliable on some GPU's.
         dumpScreenshot(getDriverApi(), renderTargets[0]);
 
         getDriverApi().flush();
@@ -249,8 +243,8 @@ TEST_F(BackendTest, FeedbackLoops) {
     executeCommands();
     getDriver().purge();
 
-    const uint32_t expected = 0xff00fb10;
-    printf("Pixel value is %8.8x, Expected %8.8x\n", goldenPixelValue, expected);
+    const uint32_t expected = 0xff08ff50;
+    printf("Pixel value is 0x%8.8x, Expected 0x%8.8x\n", goldenPixelValue, expected);
     EXPECT_EQ(goldenPixelValue, expected);
 }
 

@@ -127,8 +127,6 @@ TEST_F(BackendTest, FeedbackLoops) {
 
         TrianglePrimitive triangle(getDriverApi());
 
-        auto defaultRenderTarget = getDriverApi().createDefaultRenderTarget(0);
-
         // Create a texture.
         auto usage = TextureUsage::COLOR_ATTACHMENT | TextureUsage::SAMPLEABLE;
         Handle<HwTexture> texture = getDriverApi().createTexture(
@@ -146,12 +144,12 @@ TEST_F(BackendTest, FeedbackLoops) {
         for (uint8_t level = 0; level < kNumLevels; level++) {
             renderTargets[level] = getDriverApi().createRenderTarget(
                     TargetBufferFlags::COLOR,
-                    kTexWidth >> level,                        // width of miplevel
-                    kTexHeight >> level,                       // height of miplevel
-                    1,                                         // samples
-                    { texture, level, 0 },                     // color level
-                    {},                                        // depth
-                    {});                                       // stencil
+                    kTexWidth >> level,                 // width of miplevel
+                    kTexHeight >> level,                // height of miplevel
+                    1,                                  // samples
+                    { texture, level, 0 },              // color level
+                    {},                                 // depth
+                    {});                                // stencil
         }
 
         // Fill the base level of the texture with interesting colors.
@@ -167,10 +165,9 @@ TEST_F(BackendTest, FeedbackLoops) {
          }
         auto cb = [](void* buffer, size_t size, void* user) { free(buffer); };
         PixelBufferDescriptor pb(buffer, size, PixelDataFormat::RGBA, PixelDataType::UBYTE, cb);
-
-        // Upload texture data.
         getDriverApi().update2DImage(texture, 0, 0, 0, kTexWidth, kTexHeight, std::move(pb));
 
+        // Prep for rendering.
         RenderPassParams params = {};
         params.viewport.left = 0;
         params.viewport.bottom = 0;
@@ -178,14 +175,12 @@ TEST_F(BackendTest, FeedbackLoops) {
         params.clearColor = {1.f, 0.f, 0.f, 1.f};
         params.flags.discardStart = TargetBufferFlags::ALL;
         params.flags.discardEnd = TargetBufferFlags::NONE;
-
         PipelineState state;
         state.rasterState.colorWrite = true;
         state.rasterState.depthWrite = false;
         state.rasterState.depthFunc = RasterState::DepthFunc::A;
         state.rasterState.culling = CullingMode::NONE;
         state.program = program;
-
         backend::SamplerGroup samplers(1);
         backend::SamplerParams sparams = {};
         sparams.filterMag = SamplerMagFilter::LINEAR;
@@ -193,10 +188,8 @@ TEST_F(BackendTest, FeedbackLoops) {
         samplers.setSampler(0, texture, sparams);
         auto sgroup = getDriverApi().createSamplerGroup(samplers.getSize());
         getDriverApi().updateSamplerGroup(sgroup, std::move(samplers.toCommandStream()));
-
         auto ubuffer = getDriverApi().createUniformBuffer(sizeof(MaterialParams),
                 backend::BufferUsage::STATIC);
-
         getDriverApi().makeCurrent(swapChain, swapChain);
         getDriverApi().beginFrame(0, 0);
         getDriverApi().bindSamplers(0, sgroup);    
@@ -250,7 +243,6 @@ TEST_F(BackendTest, FeedbackLoops) {
         getDriverApi().destroyProgram(program);
         getDriverApi().destroySwapChain(swapChain);
         for (auto rt : renderTargets)  getDriverApi().destroyRenderTarget(rt);
-        getDriverApi().destroyRenderTarget(defaultRenderTarget);
     }
 
     getDriverApi().finish();

@@ -23,7 +23,7 @@
 
 namespace filament::fg2 {
 
-class PassNode : private DependencyGraph::Node {
+class PassNode : public DependencyGraph::Node {
 public:
     PassNode(FrameGraph& fg, const char* name, PassExecutor* base) noexcept;
     PassNode(PassNode&& rhs) noexcept;

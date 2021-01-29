@@ -18,11 +18,9 @@
 
 namespace filament::fg2 {
 
-ResourceNode::ResourceNode(FrameGraph& fg, const char* name, FrameGraphHandle h) noexcept
+ResourceNode::ResourceNode(FrameGraph& fg, FrameGraphHandle h) noexcept
         : DependencyGraph::Node(fg.getGraph()), resourceHandle(h)  {
 }
-
-ResourceNode::ResourceNode(ResourceNode&& rhs) noexcept = default;
 
 ResourceNode::~ResourceNode() = default;
 

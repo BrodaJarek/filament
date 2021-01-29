@@ -25,13 +25,11 @@ namespace filament::fg2 {
 
 class ResourceNode : private DependencyGraph::Node {
 public:
-    ResourceNode(FrameGraph& fg, const char* name, FrameGraphHandle h) noexcept;
-    ResourceNode(ResourceNode&& rhs) noexcept;
+    ResourceNode(FrameGraph& fg, FrameGraphHandle h) noexcept;
     ~ResourceNode() override;
 
     ResourceNode(ResourceNode const&) = delete;
     ResourceNode& operator=(ResourceNode const&) = delete;
-    ResourceNode& operator=(ResourceNode&&) = delete;
 
     // constants
     const FrameGraphHandle resourceHandle;

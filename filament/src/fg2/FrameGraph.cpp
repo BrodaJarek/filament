@@ -16,6 +16,7 @@
 
 #include "fg2/FrameGraph.h"
 #include "fg2/details/PassNode.h"
+#include "fg2/details/ResourceNode.h"
 
 namespace filament::fg2 {
 
@@ -52,7 +53,9 @@ FrameGraphId<Texture> FrameGraph::import(char const* name, Texture::Descriptor c
 
 FrameGraph::Builder FrameGraph::addPassInternal(char const* name, PassExecutor* base) noexcept {
     // record in our pass list and create the builder
-    return Builder(*this, mPassNodes.emplace_back(*this, name, base));
+    PassNode* node = new PassNode(*this, name, base);
+    mPassNodes.emplace_back(node);
+    return Builder(*this, *node);
 }
 
 } // namespace filament::fg2

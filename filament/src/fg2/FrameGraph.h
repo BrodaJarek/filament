@@ -30,6 +30,7 @@
 
 #include <backend/DriverEnums.h>
 #include <backend/Handle.h>
+#include <fg2/details/Resource.h>
 
 namespace filament {
 
@@ -39,6 +40,8 @@ namespace fg2 {
 
 class PassExecutor;
 class PassNode;
+class ResourceNode;
+class VirtualResource;
 
 class FrameGraph {
 public:
@@ -277,13 +280,48 @@ public:
     DependencyGraph& getGraph() noexcept { return mGraph; }
 
 private:
+    struct ResourceSlot {
+        int16_t rid;    // VirtualResource* index
+        int16_t nid;    // ResourceNode* index
+    };
+
     Builder addPassInternal(const char* name, PassExecutor* base) noexcept;
+
+    VirtualResource* getResource(FrameGraphHandle handle) noexcept {
+        return mResources[mResourceSlots[handle.index].rid].get();
+    }
+
+    ResourceNode* getResourceNode(FrameGraphHandle handle) noexcept {
+        return mResourceNodes[mResourceSlots[handle.index].nid].get();
+    }
+
+    VirtualResource const* getResource(FrameGraphHandle handle) const noexcept {
+        return const_cast<FrameGraph*>(this)->getResource(handle);
+    }
+
+    ResourceNode const* getResourceNode(FrameGraphHandle handle) const noexcept {
+        return const_cast<FrameGraph*>(this)->getResourceNode(handle);
+    }
+
+    bool isValid(FrameGraphHandle handle) const noexcept {
+        return handle.version == getResource(handle)->version;
+    }
 
     ResourceAllocatorInterface& mResourceAllocator;
     LinearAllocatorArena mArena;
     DependencyGraph mGraph;
 
-    std::vector<PassNode> mPassNodes;
+    // TODO: not sure that we need unique_ptr<>, it might be enough to just free the
+    //       objects in the dtor and in reset(). We can fix that later.
+    // TODO: we need pointers here because we keep pointers to PassNode and ResourceNode
+    //       in various places. If we could guarantee the vectors
+    //       couldn't move (by having a max size for each), we could get away with
+    //       vector<Foo> instead of vector<Foo*>. An alternative would be to
+    //       use indices everywhere.
+    std::vector<std::unique_ptr<PassNode>> mPassNodes;
+    std::vector<std::unique_ptr<ResourceNode>> mResourceNodes;
+    std::vector<std::unique_ptr<VirtualResource>> mResources;
+    std::vector<ResourceSlot> mResourceSlots;
 };
 
 template<typename Data, typename Setup, typename Execute>

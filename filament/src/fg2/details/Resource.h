@@ -31,71 +31,70 @@ namespace filament::fg2 {
 class PassNode;
 class ResourceNode;
 
+/*
+ * The generic parts of virtual resources.
+ */
 class VirtualResource {
 public:
-    virtual ~VirtualResource() noexcept;
-
-    /**
-     * Called during FrameGraph::compile(), this give an opportunity for this resource to
-     * calculate its effective usage flags.
-     *
-     * @param graph     DependencyGraph pointer where the Edge list lives
-     * @param edges     list of Edges const* this are guaranteed to be of the type the resource
-     *                  created in its createEdge() factory.
-     * @param count     number of edges in the list
-     */
-    virtual void resolveUsage(DependencyGraph& graph,
-            DependencyGraph::Edge const* const* edges, size_t count) noexcept = 0;
-
-    /**
-     * Instantiate the concrete resource
-     * @param resourceAllocator
-     */
-    virtual void devirtualize(ResourceAllocatorInterface& resourceAllocator) noexcept = 0;
-
-    /**
-     * Destroy the concrete resource
-     * @param resourceAllocator
-     */
-    virtual void destroy(ResourceAllocatorInterface& resourceAllocator) noexcept = 0;
-
-    /**
-     * Destroy an Edge instantiated by this resource
-     * @param edge edge to destroy
-     */
-    virtual void destroyEdge(DependencyGraph::Edge* edge) noexcept = 0;
-};
-
-// ------------------------------------------------------------------------------------------------
-
-template<typename RESOURCE>
-class Resource : public VirtualResource {
-    using Usage = typename RESOURCE::Usage;
-
-    // valid only after devirtualize() has been called
-    RESOURCE resource{};
-    Usage usage{};
-
-public:
-    using Descriptor = typename RESOURCE::Descriptor;
-    using SubResourceDescriptor = typename RESOURCE::SubResourceDescriptor;
-
-    Descriptor descriptor;
-    SubResourceDescriptor subResourceDescriptor;
-
     // constants
     const char* const name;
     const uint16_t id; // for debugging and graphing
-    bool imported;
+    bool imported = false;
 
     // updated by builder
-    uint8_t version = 0;
+    FrameGraphHandle::Version version = 0;
 
     // computed during compile()
     PassNode* first = nullptr;  // pass that needs to instantiate the resource
     PassNode* last = nullptr;   // pass that can destroy the resource
 
 
+    VirtualResource(const char* name, uint16_t id) noexcept : name(name), id(id) { }
+    VirtualResource(VirtualResource const&) = delete;
+    VirtualResource& operator=(VirtualResource const&) = delete;
+    virtual ~VirtualResource() noexcept;
+
+    /*
+     * Called during FrameGraph::compile(), this gives an opportunity for this resource to
+     * calculate its effective usage flags.
+     */
+    virtual void resolveUsage(DependencyGraph& graph,
+            DependencyGraph::Edge const* const* edges, size_t count) noexcept = 0;
+
+    /* Instantiate the concrete resource */
+    virtual void devirtualize(ResourceAllocatorInterface& resourceAllocator) noexcept = 0;
+
+    /* Destroy the concrete resource */
+    virtual void destroy(ResourceAllocatorInterface& resourceAllocator) noexcept = 0;
+
+    /** Destroy an Edge instantiated by this resource */
+    virtual void destroyEdge(DependencyGraph::Edge* edge) noexcept = 0;
+};
+
+// ------------------------------------------------------------------------------------------------
+
+/*
+ * Resource specific parts of a VirtualResource
+ */
+template<typename RESOURCE>
+class Resource : public VirtualResource {
+    using Usage = typename RESOURCE::Usage;
+
+    // valid only after devirtualize() has been called
+    RESOURCE resource{};
+
+    // valid only after resolveUsage() has been called
+    Usage usage{};
+
+public:
+    using Descriptor = typename RESOURCE::Descriptor;
+    using SubResourceDescriptor = typename RESOURCE::SubResourceDescriptor;
+
+    // our concrete (sub)resource descriptors -- used to create it.
+    Descriptor descriptor;
+    SubResourceDescriptor subResourceDescriptor;
+
+    // An Edge with added data from this resource
     class ResourceEdge : public DependencyGraph::Edge {
     public:
         Usage usage;
@@ -106,7 +105,7 @@ public:
     };
 
     Resource(const char* name, Descriptor const& desc, uint16_t id) noexcept
-        : name(name), id(id), descriptor(desc) {
+        : VirtualResource(name, id), descriptor(desc) {
     }
 
     // pass Node to resource Node edge (a write to)
@@ -122,7 +121,10 @@ public:
     }
 
 private:
-    // virtuals from VirtualResource
+    /*
+     * The virtual below must be in a header file as RESOURCE is only known at compile time
+     */
+
     void resolveUsage(DependencyGraph& graph, DependencyGraph::Edge const* const* edges,
             size_t count) noexcept override {
         for (size_t i = 0; i < count; i++) {

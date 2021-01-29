@@ -17,10 +17,57 @@
 #ifndef TNT_FILAMENT_FG2_FRAMEGRAPHID_H
 #define TNT_FILAMENT_FG2_FRAMEGRAPHID_H
 
+#include <stdint.h>
+#include <limits>
+
 namespace filament::fg2 {
 
 /** A handle on a resource */
-struct FrameGraphHandle {
+class FrameGraphHandle {
+public:
+    using Index = uint16_t;
+    using Version = uint16_t;
+
+private:
+    template<typename T>
+    friend class FrameGraphId;
+    friend class FrameGraph;
+
+    // private ctor -- this cannot be constructed by users
+    FrameGraphHandle() noexcept = default;
+    explicit FrameGraphHandle(Index index) noexcept : index(index) {}
+
+    // index to the resource handle
+    static constexpr uint16_t UNINITIALIZED = std::numeric_limits<Index>::max();
+    uint16_t index = UNINITIALIZED;     // index to a ResourceSlot
+    Version version = 0;
+
+public:
+    FrameGraphHandle(FrameGraphHandle const& rhs) noexcept = default;
+    FrameGraphHandle(FrameGraphHandle&& rhs) noexcept : index(rhs.index) {
+        rhs.index = UNINITIALIZED; rhs.version = 0; }
+    FrameGraphHandle& operator=(FrameGraphHandle const& rhs) noexcept = default;
+    FrameGraphHandle& operator=(FrameGraphHandle&& rhs) noexcept  {
+        std::swap(rhs.index, index);
+        std::swap(rhs.version, version);
+        return *this;
+    }
+
+    bool isValid() const noexcept { return index != UNINITIALIZED; }
+
+    void clear() noexcept { index = UNINITIALIZED; version = 0; }
+
+    bool operator < (const FrameGraphHandle& rhs) const noexcept {
+        return index < rhs.index;
+    }
+
+    bool operator == (const FrameGraphHandle& rhs) const noexcept {
+        return (index == rhs.index);
+    }
+
+    bool operator != (const FrameGraphHandle& rhs) const noexcept {
+        return !operator==(rhs);
+    }
 };
 
 /** A typed handle on a resource */

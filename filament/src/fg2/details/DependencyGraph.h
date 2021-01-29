@@ -111,7 +111,7 @@ public:
         virtual char const* getName() const = 0;
 
         //! called from DependencyGraph::cull() when a node a culled
-        virtual void onCulled(DependencyGraph* graph) = 0;
+        virtual void onCulled(DependencyGraph* graph) { }
 
     private:
         // nodes that read from us: i.e. we have a reference to them

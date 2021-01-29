@@ -61,7 +61,7 @@ static uint32_t goldenPixelValue = 0;
 
 static constexpr int kTexWidth = 360;
 static constexpr int kTexHeight = 375;
-static constexpr int kNumLevels = 5;
+static constexpr int kNumLevels = 6;
 
 namespace test {
 
@@ -139,6 +139,7 @@ TEST_F(BackendTest, FeedbackLoops) {
         // Create a RenderTarget for each miplevel.
         Handle<HwRenderTarget> renderTargets[kNumLevels];
         for (uint8_t level = 0; level < kNumLevels; level++) {
+            printf("Level %d: %d x %d\n", level, kTexWidth >> level, kTexHeight >> level);
             renderTargets[level] = getDriverApi().createRenderTarget(
                     TargetBufferFlags::COLOR,
                     kTexWidth >> level,                 // width of miplevel
@@ -243,7 +244,7 @@ TEST_F(BackendTest, FeedbackLoops) {
     executeCommands();
     getDriver().purge();
 
-    const uint32_t expected = 0xff08ff50;
+    const uint32_t expected = 0xff12ff60;
     printf("Pixel value is 0x%8.8x, Expected 0x%8.8x\n", goldenPixelValue, expected);
     EXPECT_EQ(goldenPixelValue, expected);
 }

@@ -62,8 +62,9 @@ void main() {
 
 static uint32_t goldenPixelValue = 0;
 
-static const int kTexWidth = 360;
-static const int kTexHeight = 375;
+static constexpr int kTexWidth = 360;
+static constexpr int kTexHeight = 375;
+static constexpr int kNumLevels = 4;
 
 namespace test {
 
@@ -128,11 +129,11 @@ TEST_F(BackendTest, FeedbackLoops) {
 
         auto defaultRenderTarget = getDriverApi().createDefaultRenderTarget(0);
 
-        // Create a Texture with two miplevels.
+        // Create a texture.
         auto usage = TextureUsage::COLOR_ATTACHMENT | TextureUsage::SAMPLEABLE;
         Handle<HwTexture> texture = getDriverApi().createTexture(
                     SamplerType::SAMPLER_2D,            // target
-                    2,                                  // levels
+                    kNumLevels,                         // levels
                     TextureFormat::R11F_G11F_B10F,      // format
                     1,                                  // samples
                     kTexWidth,                          // width
@@ -141,12 +142,12 @@ TEST_F(BackendTest, FeedbackLoops) {
                     usage);                             // usage
 
         // Create a RenderTarget for each miplevel.
-        Handle<HwRenderTarget> renderTargets[2];
-        for (uint8_t level = 0; level < 2; level++) {
+        Handle<HwRenderTarget> renderTargets[kNumLevels];
+        for (uint8_t level = 0; level < kNumLevels; level++) {
             renderTargets[level] = getDriverApi().createRenderTarget(
                     TargetBufferFlags::COLOR,
-                    kTexWidth / 2,                             // width of miplevel
-                    kTexHeight / 2,                            // height of miplevel
+                    kTexWidth >> level,                        // width of miplevel
+                    kTexHeight >> level,                       // height of miplevel
                     1,                                         // samples
                     { texture, level, 0 },                     // color level
                     {},                                        // depth
@@ -201,42 +202,45 @@ TEST_F(BackendTest, FeedbackLoops) {
         getDriverApi().bindSamplers(0, sgroup);    
         getDriverApi().bindUniformBuffer(0, ubuffer);
 
-        // Update uniforms.
-        params.viewport.width = kTexWidth / 2;
-        params.viewport.height = kTexHeight / 2;
-        uploadUniforms(getDriverApi(), ubuffer, {
-            .fbWidth = float(params.viewport.width),
-            .fbHeight = float(params.viewport.height),
-            .sourceLod = 0.0f,
-            .blend = 0.0f,
-        });
-
-        // Downsample pass.
+        // Downsample passes
         state.rasterState.disableBlending();
-        // getDriverApi().setMinMaxLevels(texture, 0, 0);
-        getDriverApi().beginRenderPass(renderTargets[1], params);
-        getDriverApi().draw(state, triangle.getRenderPrimitive());
-        getDriverApi().endRenderPass();
+        for (int targetLevel = 1; targetLevel < kNumLevels; targetLevel++) {
+            params.viewport.width = kTexWidth >> targetLevel;
+            params.viewport.height = kTexHeight >> targetLevel;
+            uploadUniforms(getDriverApi(), ubuffer, {
+                .fbWidth = float(params.viewport.width),
+                .fbHeight = float(params.viewport.height),
+                .sourceLod = float(targetLevel - 1),
+                .blend = 0.0f,
+            });
+            // getDriverApi().setMinMaxLevels(texture, 0, 0);
+            getDriverApi().beginRenderPass(renderTargets[targetLevel], params);
+            getDriverApi().draw(state, triangle.getRenderPrimitive());
+            getDriverApi().endRenderPass();
+        }
 
-        // Update uniforms.
-        params.viewport.width = kTexWidth;
-        params.viewport.height = kTexHeight;
-        uploadUniforms(getDriverApi(), ubuffer, {
-            .fbWidth = float(params.viewport.width),
-            .fbHeight = float(params.viewport.height),
-            .sourceLod = 1.0f,
-            .blend = 1.0f,
-        });
-
-        // Upsample pass.
+        // Upsample passes
         state.rasterState.blendFunctionSrcRGB = BlendFunction::SRC_ALPHA;
         state.rasterState.blendFunctionDstRGB = BlendFunction::ONE_MINUS_SRC_ALPHA;
-        // getDriverApi().setMinMaxLevels(texture, 1, 1);
-        getDriverApi().beginRenderPass(renderTargets[0], params);
-        getDriverApi().draw(state, triangle.getRenderPrimitive());
-        getDriverApi().endRenderPass();
+        for (int targetLevel = kNumLevels - 2; targetLevel >= 0; targetLevel--) {
+            params.viewport.width = kTexWidth >> targetLevel;
+            params.viewport.height = kTexHeight >> targetLevel;
+            uploadUniforms(getDriverApi(), ubuffer, {
+                .fbWidth = float(params.viewport.width),
+                .fbHeight = float(params.viewport.height),
+                .sourceLod = float(targetLevel + 1),
+                .blend = 1.0f,
+            });
+            // getDriverApi().setMinMaxLevels(texture, 1, 1);
+            getDriverApi().beginRenderPass(renderTargets[targetLevel], params);
+            getDriverApi().draw(state, triangle.getRenderPrimitive());
+            getDriverApi().endRenderPass();
+        }
 
-        // Read back the current render target.
+        // Read back the render target corresponding to the base level.
+        //
+        // NOTE: Calling glReadPixels on any miplevel other than the base level
+        // seems to un un-reliable on some GPU's.
         dumpScreenshot(getDriverApi(), renderTargets[0]);
 
         getDriverApi().flush();
@@ -245,8 +249,7 @@ TEST_F(BackendTest, FeedbackLoops) {
 
         getDriverApi().destroyProgram(program);
         getDriverApi().destroySwapChain(swapChain);
-        getDriverApi().destroyRenderTarget(renderTargets[0]);
-        getDriverApi().destroyRenderTarget(renderTargets[1]);
+        for (auto rt : renderTargets)  getDriverApi().destroyRenderTarget(rt);
         getDriverApi().destroyRenderTarget(defaultRenderTarget);
     }
 
@@ -254,7 +257,7 @@ TEST_F(BackendTest, FeedbackLoops) {
     executeCommands();
     getDriver().purge();
 
-    const uint32_t expected = 0xff007e87;
+    const uint32_t expected = 0xff001ee1;
     printf("Pixel value is %8.8x, Expected %8.8x\n", goldenPixelValue, expected);
     EXPECT_EQ(goldenPixelValue, expected);
 }

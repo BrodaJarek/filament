@@ -229,12 +229,14 @@ TEST_F(BackendTest, FeedbackLoops) {
             params.flags.discardStart = TargetBufferFlags::ALL;
             state.rasterState.disableBlending();
             for (int targetLevel = 1; targetLevel < kNumLevels; targetLevel++) {
+                const uint32_t sourceLevel = targetLevel - 1;
                 params.viewport.width = kTexWidth >> targetLevel;
                 params.viewport.height = kTexHeight >> targetLevel;
+                getDriverApi().setMinMaxLevels(texture, sourceLevel, sourceLevel);
                 uploadUniforms(getDriverApi(), ubuffer, {
                     .fbWidth = float(params.viewport.width),
                     .fbHeight = float(params.viewport.height),
-                    .sourceLevel = float(targetLevel - 1),
+                    .sourceLevel = float(sourceLevel),
                 });
                 api.beginRenderPass(renderTargets[targetLevel], params);
                 api.draw(state, triangle.getRenderPrimitive());
@@ -246,17 +248,21 @@ TEST_F(BackendTest, FeedbackLoops) {
             state.rasterState.blendFunctionSrcRGB = BlendFunction::ONE;
             state.rasterState.blendFunctionDstRGB = BlendFunction::ONE;
             for (int targetLevel = kNumLevels - 2; targetLevel >= 0; targetLevel--) {
+                const uint32_t sourceLevel = targetLevel + 1;
                 params.viewport.width = kTexWidth >> targetLevel;
                 params.viewport.height = kTexHeight >> targetLevel;
+                getDriverApi().setMinMaxLevels(texture, sourceLevel, sourceLevel);
                 uploadUniforms(getDriverApi(), ubuffer, {
                     .fbWidth = float(params.viewport.width),
                     .fbHeight = float(params.viewport.height),
-                    .sourceLevel = float(targetLevel + 1),
+                    .sourceLevel = float(sourceLevel),
                 });
                 api.beginRenderPass(renderTargets[targetLevel], params);
                 api.draw(state, triangle.getRenderPrimitive());
                 api.endRenderPass();
             }
+
+            getDriverApi().setMinMaxLevels(texture, 0, 0x7f);
 
             // Read back the render target corresponding to the base level.
             //

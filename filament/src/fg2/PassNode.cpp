@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "fg2/FrameGraph.h"
 #include "fg2/details/PassNode.h"
 
 namespace filament::fg2 {

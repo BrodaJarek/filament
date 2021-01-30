@@ -19,6 +19,8 @@
 
 #include "fg2/FrameGraphId.h"
 #include "fg2/details/DependencyGraph.h"
+#include "fg2/details/PassNode.h"
+#include "fg2/details/ResourceNode.h"
 
 #include <vector>
 
@@ -27,9 +29,6 @@ class ResourceAllocatorInterface;
 } // namespace::filament
 
 namespace filament::fg2 {
-
-class PassNode;
-class ResourceNode;
 
 /*
  * The generic parts of virtual resources.
@@ -47,7 +46,6 @@ public:
     // computed during compile()
     PassNode* first = nullptr;  // pass that needs to instantiate the resource
     PassNode* last = nullptr;   // pass that can destroy the resource
-
 
     VirtualResource(const char* name, uint16_t id) noexcept : name(name), id(id) { }
     VirtualResource(VirtualResource const&) = delete;
@@ -69,6 +67,10 @@ public:
 
     /** Destroy an Edge instantiated by this resource */
     virtual void destroyEdge(DependencyGraph::Edge* edge) noexcept = 0;
+
+protected:
+    void addOutgoingEdge(ResourceNode* node, DependencyGraph::Edge* edge) noexcept;
+    void setIncomingEdge(ResourceNode* node, DependencyGraph::Edge* edge) noexcept;
 };
 
 // ------------------------------------------------------------------------------------------------
@@ -108,16 +110,20 @@ public:
         : VirtualResource(name, id), descriptor(desc) {
     }
 
+    ~Resource() noexcept = default;
+
     // pass Node to resource Node edge (a write to)
-    DependencyGraph::Edge* createEdge(DependencyGraph& graph,
+    void connect(DependencyGraph& graph,
             PassNode* passNode, ResourceNode* resourceNode, Usage u) noexcept {
-        return new ResourceEdge(graph, passNode, resourceNode, u);
+        auto* edge = new ResourceEdge(graph, passNode, resourceNode, u);
+        setIncomingEdge(resourceNode, edge);
     }
 
     // resource Node to pass Node edge (a read from)
-    DependencyGraph::Edge* createEdge(DependencyGraph& graph,
+    void connect(DependencyGraph& graph,
             ResourceNode* resourceNode, PassNode* passNode, Usage u) noexcept {
-        return new ResourceEdge(graph, resourceNode, passNode, u);
+        auto* edge = new ResourceEdge(graph, resourceNode, passNode, u);
+        addOutgoingEdge(resourceNode, edge);
     }
 
 private:

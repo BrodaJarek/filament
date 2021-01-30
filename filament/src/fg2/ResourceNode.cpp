@@ -14,21 +14,38 @@
  * limitations under the License.
  */
 
+#include "fg2/FrameGraph.h"
 #include "fg2/details/ResourceNode.h"
 
 namespace filament::fg2 {
 
 ResourceNode::ResourceNode(FrameGraph& fg, FrameGraphHandle h) noexcept
-        : DependencyGraph::Node(fg.getGraph()), resourceHandle(h)  {
+        : DependencyGraph::Node(fg.getGraph()),
+          resourceHandle(h), mFrameGraph(fg) {
 }
 
-ResourceNode::~ResourceNode() = default;
+ResourceNode::~ResourceNode() noexcept {
+    VirtualResource* resource = mFrameGraph.getResource(resourceHandle);
+    assert(resource);
+    resource->destroyEdge(mWriter);
+    for (auto* pEdge : mReaders) {
+        resource->destroyEdge(pEdge);
+    }
+}
 
 void ResourceNode::onCulled(DependencyGraph* graph) {
 }
 
 char const* ResourceNode::getName() const {
-    return nullptr;
+    return mFrameGraph.getResource(resourceHandle)->name;
 }
 
+void ResourceNode::addOutgoingEdge(DependencyGraph::Edge* edge) noexcept {
+    mReaders.push_back(edge);
+}
+
+void ResourceNode::setIncomingEdge(DependencyGraph::Edge* edge) noexcept {
+    assert(mWriter == nullptr);
+    mWriter = edge;
+}
 } // namespace filament::fg2

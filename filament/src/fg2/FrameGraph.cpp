@@ -17,6 +17,7 @@
 #include "fg2/FrameGraph.h"
 #include "fg2/details/PassNode.h"
 #include "fg2/details/ResourceNode.h"
+#include "fg2/details/DependencyGraph.h"
 
 namespace filament::fg2 {
 
@@ -25,6 +26,11 @@ FrameGraph::Builder::Builder(FrameGraph& fg, PassNode& pass) noexcept
 }
 
 FrameGraph::Builder::~Builder() noexcept = default;
+
+void FrameGraph::Builder::sideEffect() noexcept {
+    // TODO: could be interesting to implement this by adding a "side effect" node
+    mPass.makeTarget();
+}
 
 // ------------------------------------------------------------------------------------------------
 
@@ -37,6 +43,8 @@ FrameGraph::FrameGraph(ResourceAllocatorInterface& resourceAllocator)
 FrameGraph::~FrameGraph() = default;
 
 FrameGraph& FrameGraph::compile() noexcept {
+    mGraph.cull();
+    mGraph.export_graphviz(utils::slog.d);
     return *this;
 }
 
@@ -44,6 +52,16 @@ void FrameGraph::execute(backend::DriverApi& driver) noexcept {
 }
 
 void FrameGraph::present(FrameGraphHandle input) {
+    assert(isValid(input));
+
+//    struct Empty{};
+//    addPass<Empty>("Present",
+//            [&](Builder& builder, auto& data) {
+//                builder.read(input);
+//                builder.sideEffect();
+//            }, [](FrameGraphResources const& resources, auto const& data, backend::DriverApi&) {});
+
+    getResourceNode(input)->makeTarget();
 }
 
 FrameGraphId<Texture> FrameGraph::import(char const* name, Texture::Descriptor const& desc,
@@ -56,6 +74,42 @@ FrameGraph::Builder FrameGraph::addPassInternal(char const* name, PassExecutor* 
     PassNode* node = new PassNode(*this, name, base);
     mPassNodes.emplace_back(node);
     return Builder(*this, *node);
+}
+
+FrameGraphHandle FrameGraph::addResourceInternal(VirtualResource* resource) noexcept {
+    FrameGraphHandle handle(mResourceSlots.size());
+    ResourceSlot& slot = mResourceSlots.emplace_back();
+    slot.rid = mResources.size();
+    slot.nid = mResourceNodes.size();
+    mResources.emplace_back(resource);
+    mResourceNodes.emplace_back(new ResourceNode(*this, handle));
+    return handle;
+}
+
+FrameGraphHandle FrameGraph::writeInternal(FrameGraphHandle handle) noexcept {
+    assert(isValid(handle));
+
+    if (!getResourceNode(handle)->hasWriter()) {
+        // this just means the resource was just created and was never written to.
+        return handle;
+    }
+
+    // create a new handle with next version number
+    FrameGraphHandle newHandle(handle);
+    newHandle.version++;
+
+    // update the slot with new ResourceNode index
+    ResourceSlot& slot = mResourceSlots[handle.index];
+    slot.nid = mResourceNodes.size();
+
+    // create new ResourceNodes
+    ResourceNode* node = new ResourceNode(*this, newHandle);
+    mResourceNodes.emplace_back(node);
+
+    // update version number in resource
+    mResources[slot.rid]->version = newHandle.version;
+
+    return newHandle;
 }
 
 } // namespace filament::fg2

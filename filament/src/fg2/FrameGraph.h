@@ -23,6 +23,7 @@
 #include "fg2/Texture.h"
 
 #include "fg2/details/DependencyGraph.h"
+#include "fg2/details/Resource.h"
 
 #include "details/Allocators.h"
 
@@ -30,7 +31,6 @@
 
 #include <backend/DriverEnums.h>
 #include <backend/Handle.h>
-#include <fg2/details/Resource.h>
 
 namespace filament {
 
@@ -280,18 +280,26 @@ public:
     DependencyGraph& getGraph() noexcept { return mGraph; }
 
 private:
+    friend class ResourceNode;
+
     struct ResourceSlot {
         int16_t rid;    // VirtualResource* index
         int16_t nid;    // ResourceNode* index
     };
 
     Builder addPassInternal(const char* name, PassExecutor* base) noexcept;
+    FrameGraphHandle addResourceInternal(VirtualResource* resource) noexcept;
+    FrameGraphHandle writeInternal(FrameGraphHandle handle) noexcept;
 
     VirtualResource* getResource(FrameGraphHandle handle) noexcept {
+        assert((size_t)handle.index < mResourceSlots.size());
+        assert((size_t)mResourceSlots[handle.index].rid < mResources.size());
         return mResources[mResourceSlots[handle.index].rid].get();
     }
 
     ResourceNode* getResourceNode(FrameGraphHandle handle) noexcept {
+        assert((size_t)handle.index < mResourceSlots.size());
+        assert((size_t)mResourceSlots[handle.index].rid < mResourceNodes.size());
         return mResourceNodes[mResourceSlots[handle.index].nid].get();
     }
 
@@ -318,10 +326,10 @@ private:
     //       couldn't move (by having a max size for each), we could get away with
     //       vector<Foo> instead of vector<Foo*>. An alternative would be to
     //       use indices everywhere.
-    std::vector<std::unique_ptr<PassNode>> mPassNodes;
-    std::vector<std::unique_ptr<ResourceNode>> mResourceNodes;
-    std::vector<std::unique_ptr<VirtualResource>> mResources;
     std::vector<ResourceSlot> mResourceSlots;
+    std::vector<std::unique_ptr<VirtualResource>> mResources;
+    std::vector<std::unique_ptr<ResourceNode>> mResourceNodes;
+    std::vector<std::unique_ptr<PassNode>> mPassNodes;
 };
 
 template<typename Data, typename Setup, typename Execute>
@@ -336,6 +344,51 @@ Pass<Data, Execute>& FrameGraph::addPass(char const* name, Setup setup, Execute&
 
     // return a reference to the pass to the user
     return *pass;
+}
+
+// -----------------------------------------------------------------------------------------------
+
+template<typename RESOURCE>
+FrameGraphId<RESOURCE> FrameGraph::Builder::create(char const* name,
+        typename RESOURCE::Descriptor const& desc) noexcept {
+    VirtualResource* resource = new Resource<RESOURCE>(name, desc, mFrameGraph.mResources.size());
+    FrameGraphHandle handle = mFrameGraph.addResourceInternal(resource);
+    return FrameGraphId<RESOURCE>(handle);
+}
+
+template<typename RESOURCE>
+FrameGraphId<RESOURCE> FrameGraph::Builder::read(
+        FrameGraphId<RESOURCE> input, typename RESOURCE::Usage usage) {
+    FrameGraphId<RESOURCE> result;
+    FrameGraph& frameGraph = mFrameGraph;
+    if (frameGraph.isValid(input)) {
+        ResourceNode* node = frameGraph.getResourceNode(input);
+        VirtualResource* vresource = frameGraph.getResource(input);
+        Resource<RESOURCE>* resource = static_cast<Resource<RESOURCE> *>(vresource);
+        resource->connect(frameGraph.mGraph, node, &mPass, usage);
+        result = input;
+    }
+    return result;
+}
+
+template<typename RESOURCE>
+FrameGraphId<RESOURCE> FrameGraph::Builder::write(
+        FrameGraphId<RESOURCE> input, typename RESOURCE::Usage usage) {
+    FrameGraph& frameGraph = mFrameGraph;
+    FrameGraphHandle newHandle = mFrameGraph.writeInternal(input);
+    if (newHandle.isValid()) {
+        ResourceNode* node = frameGraph.getResourceNode(newHandle);
+        VirtualResource* vresource = frameGraph.getResource(newHandle);
+        Resource<RESOURCE>* resource = static_cast<Resource<RESOURCE>*>(vresource);
+        resource->connect(frameGraph.mGraph, &mPass, node, usage);
+    }
+    return FrameGraphId<RESOURCE>(newHandle);
+}
+
+template<typename RESOURCE>
+typename RESOURCE::Descriptor const& FrameGraph::Builder::getDescriptor(
+        FrameGraphId<RESOURCE> handle) const {
+    return static_cast<RESOURCE const*>(mFrameGraph.getResource(handle))->descriptor;
 }
 
 

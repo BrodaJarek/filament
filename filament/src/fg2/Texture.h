@@ -66,13 +66,17 @@ struct Texture {
      * @param descriptor Descriptor to the resource
      */
     void create(ResourceAllocatorInterface& resourceAllocator,
-            Descriptor const& descriptor, Usage usage) noexcept;
+            Descriptor const& descriptor, Usage usage) noexcept {
+        // TODO: implement in cpp file
+    }
 
     /**
      * Destroy the concrete resource
      * @param resourceAllocator
      */
-    void destroy(ResourceAllocatorInterface& resourceAllocator) noexcept;
+    void destroy(ResourceAllocatorInterface& resourceAllocator) noexcept {
+        // TODO: implement in cpp file
+    }
 };
 
 } // namespace filament::fg2

@@ -15,9 +15,18 @@
  */
 
 #include "fg2/details/Resource.h"
+#include "fg2/details/ResourceNode.h"
 
 namespace filament::fg2 {
 
 VirtualResource::~VirtualResource() noexcept = default;
+
+void VirtualResource::addOutgoingEdge(ResourceNode* node, DependencyGraph::Edge* edge) noexcept {
+    node->addOutgoingEdge(edge);
+}
+
+void VirtualResource::setIncomingEdge(ResourceNode* node, DependencyGraph::Edge* edge) noexcept {
+    node->setIncomingEdge(edge);
+}
 
 } // namespace filament::fg2

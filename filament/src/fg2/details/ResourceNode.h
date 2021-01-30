@@ -17,27 +17,39 @@
 #ifndef TNT_FILAMENT_FG2_RESOURCENODE_H
 #define TNT_FILAMENT_FG2_RESOURCENODE_H
 
-#include "fg2/FrameGraph.h"
 #include "fg2/details/DependencyGraph.h"
 #include "fg2/details/Utilities.h"
 
 namespace filament::fg2 {
 
-class ResourceNode : private DependencyGraph::Node {
+class FrameGraph;
+
+class ResourceNode : public DependencyGraph::Node {
 public:
     ResourceNode(FrameGraph& fg, FrameGraphHandle h) noexcept;
-    ~ResourceNode() override;
+    ~ResourceNode() noexcept override;
 
     ResourceNode(ResourceNode const&) = delete;
     ResourceNode& operator=(ResourceNode const&) = delete;
 
+    void addOutgoingEdge(DependencyGraph::Edge* edge) noexcept;
+    void setIncomingEdge(DependencyGraph::Edge* edge) noexcept;
+
     // constants
     const FrameGraphHandle resourceHandle;
+
+    bool hasWriter() const noexcept {
+        return mWriter != nullptr;
+    }
 
 private:
     // virtuals from DependencyGraph::Node
     char const* getName() const override;
     void onCulled(DependencyGraph* graph) override;
+
+    FrameGraph& mFrameGraph;
+    std::vector<DependencyGraph::Edge *> mReaders;
+    DependencyGraph::Edge* mWriter = nullptr;
 };
 
 } // namespace filament::fg2

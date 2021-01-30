@@ -17,11 +17,13 @@
 #ifndef TNT_FILAMENT_FG2_PASSNODE_H
 #define TNT_FILAMENT_FG2_PASSNODE_H
 
-#include "fg2/FrameGraph.h"
 #include "fg2/details/DependencyGraph.h"
 #include "fg2/details/Utilities.h"
 
 namespace filament::fg2 {
+
+class FrameGraph;
+class PassExecutor;
 
 class PassNode : public DependencyGraph::Node {
 public:

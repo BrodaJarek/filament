@@ -587,10 +587,26 @@ TEST(FrameGraph2Test, Simple) {
     MockResourceAllocator resourceAllocator;
     fg2::FrameGraph fg(resourceAllocator);
     struct Data {
+        fg2::FrameGraphId<Texture> output;
     };
-    auto& pass = fg.addPass<Data>("test",
+    auto& pass0 = fg.addPass<Data>("pass0",
             [&](fg2::FrameGraph::Builder& builder, auto& data) {
+                data.output = builder.create<Texture>("Resource0", {.width=16, .height=32});
+                data.output = builder.write(data.output, Texture::Usage::UPLOADABLE);
             },
             [=](FrameGraphResources const& resources, auto const& data, backend::DriverApi& driver) {
             });
+
+    auto& pass1 = fg.addPass<Data>("pass1",
+            [&](fg2::FrameGraph::Builder& builder, auto& data) {
+                builder.read(pass0.getData().output, Texture::Usage::SAMPLEABLE);
+                data.output = builder.create<Texture>("Resource1", {.width=32, .height=64});
+                data.output = builder.write(data.output, Texture::Usage::COLOR_ATTACHMENT);
+            },
+            [=](FrameGraphResources const& resources, auto const& data, backend::DriverApi& driver) {
+            });
+
+    fg.present(pass1.getData().output);
+
+    fg.compile();
 }
